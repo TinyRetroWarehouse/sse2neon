@@ -3,7 +3,7 @@ override CXX = g++
 endif
 
 ifndef CROSS_COMPILE
-    processor := $(shell uname -p)
+    processor := $(shell uname -m)
 else # CROSS_COMPILE was set
     CXX = $(CROSS_COMPILE)g++
     CXXFLAGS += -static
@@ -24,11 +24,11 @@ EXEC_WRAPPER = qemu-$(processor)
 endif
 
 # Follow platform-specific configurations
-ifeq ($(processor),aarch64)
+ifeq ($(processor),$(filter $(processor),aarch64 arm64))
     ARCH_CFLAGS = -march=armv8-a+fp+simd+crc
 else ifeq ($(processor),$(filter $(processor),i386 x86_64))
     ARCH_CFLAGS = -maes -mpclmul -mssse3 -msse4.2
-else ifeq ($(processor),arm)
+else ifeq ($(processor),$(filter $(processor),arm armv7l))
     ARCH_CFLAGS = -mfpu=neon
 else
     $(error Unsupported architecture)
@@ -56,7 +56,9 @@ check: tests/main
 	$(EXEC_WRAPPER) $^
 
 indent:
-	clang-format -i sse2neon.h tests/*.cpp tests/*.h
+	@echo "Formating files with clang-format.."
+	@if ! hash clang-format-6.0; then echo "clang-format 6.0 is required to indent"; fi
+	clang-format-6.0 -i sse2neon.h tests/*.cpp tests/*.h
 
 .PHONY: clean check format
 clean:

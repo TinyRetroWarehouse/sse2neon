@@ -7,30 +7,6 @@ namespace SSE2NEON
 int32_t NaN = ~0;
 int64_t NaN64 = ~0;
 
-result_t validate128(__m128i a, __m128i b)
-{
-    const int32_t *t1 = (const int32_t *) &a;
-    const int32_t *t2 = (const int32_t *) &b;
-
-    ASSERT_RETURN(t1[0] == t2[0]);
-    ASSERT_RETURN(t1[1] == t2[1]);
-    ASSERT_RETURN(t1[2] == t2[2]);
-    ASSERT_RETURN(t1[3] == t2[3]);
-    return TEST_SUCCESS;
-}
-
-result_t validate128(__m128d a, __m128d b)
-{
-    const int32_t *t1 = (const int32_t *) &a;
-    const int32_t *t2 = (const int32_t *) &b;
-
-    ASSERT_RETURN(t1[0] == t2[0]);
-    ASSERT_RETURN(t1[1] == t2[1]);
-    ASSERT_RETURN(t1[2] == t2[2]);
-    ASSERT_RETURN(t1[3] == t2[3]);
-    return TEST_SUCCESS;
-}
-
 result_t validateInt64(__m128i a, int64_t i0, int64_t i1)
 {
     const int64_t *t = (const int64_t *) &a;
@@ -39,11 +15,25 @@ result_t validateInt64(__m128i a, int64_t i0, int64_t i1)
     return TEST_SUCCESS;
 }
 
+result_t validateInt64(__m64 a, int64_t i0)
+{
+    const int64_t *t = (const int64_t *) &a;
+    ASSERT_RETURN(t[0] == i0);
+    return TEST_SUCCESS;
+}
+
 result_t validateUInt64(__m128i a, uint64_t u0, uint64_t u1)
 {
     const uint64_t *t = (const uint64_t *) &a;
     ASSERT_RETURN(t[0] == u0);
     ASSERT_RETURN(t[1] == u1);
+    return TEST_SUCCESS;
+}
+
+result_t validateUInt64(__m64 a, uint64_t u0)
+{
+    const uint64_t *t = (const uint64_t *) &a;
+    ASSERT_RETURN(t[0] == u0);
     return TEST_SUCCESS;
 }
 
@@ -72,6 +62,14 @@ result_t validateUInt32(__m128i a,
     ASSERT_RETURN(t[1] == u1);
     ASSERT_RETURN(t[2] == u2);
     ASSERT_RETURN(t[3] == u3);
+    return TEST_SUCCESS;
+}
+
+result_t validateUInt32(__m64 a, uint32_t u0, uint32_t u1)
+{
+    const uint32_t *t = (const uint32_t *) &a;
+    ASSERT_RETURN(t[0] == u0);
+    ASSERT_RETURN(t[1] == u1);
     return TEST_SUCCESS;
 }
 
@@ -189,6 +187,28 @@ result_t validateInt8(__m128i a,
     return TEST_SUCCESS;
 }
 
+result_t validateInt8(__m64 a,
+                      int8_t i0,
+                      int8_t i1,
+                      int8_t i2,
+                      int8_t i3,
+                      int8_t i4,
+                      int8_t i5,
+                      int8_t i6,
+                      int8_t i7)
+{
+    const int8_t *t = (const int8_t *) &a;
+    ASSERT_RETURN(t[0] == i0);
+    ASSERT_RETURN(t[1] == i1);
+    ASSERT_RETURN(t[2] == i2);
+    ASSERT_RETURN(t[3] == i3);
+    ASSERT_RETURN(t[4] == i4);
+    ASSERT_RETURN(t[5] == i5);
+    ASSERT_RETURN(t[6] == i6);
+    ASSERT_RETURN(t[7] == i7);
+    return TEST_SUCCESS;
+}
+
 result_t validateUInt8(__m128i a,
                        uint8_t u0,
                        uint8_t u1,
@@ -295,6 +315,42 @@ result_t validateFloatEpsilon(__m128 a,
     ASSERT_RETURN(df1 < epsilon);
     ASSERT_RETURN(df2 < epsilon);
     ASSERT_RETURN(df3 < epsilon);
+    return TEST_SUCCESS;
+}
+
+result_t validateFloatError(__m128 a,
+                            float f0,
+                            float f1,
+                            float f2,
+                            float f3,
+                            float err)
+{
+    const float *t = (const float *) &a;
+    float df0 = fabsf((t[0] - f0) / f0);
+    float df1 = fabsf((t[1] - f1) / f1);
+    float df2 = fabsf((t[2] - f2) / f2);
+    float df3 = fabsf((t[3] - f3) / f3);
+
+    if (std::isnan(t[0]) && std::isnan(f0)) {
+        df0 = 0;
+    }
+
+    if (std::isnan(t[1]) && std::isnan(f1)) {
+        df1 = 0;
+    }
+
+    if (std::isnan(t[2]) && std::isnan(f2)) {
+        df2 = 0;
+    }
+
+    if (std::isnan(t[3]) && std::isnan(f3)) {
+        df3 = 0;
+    }
+
+    ASSERT_RETURN(df0 < err);
+    ASSERT_RETURN(df1 < err);
+    ASSERT_RETURN(df2 < err);
+    ASSERT_RETURN(df3 < err);
     return TEST_SUCCESS;
 }
 

@@ -61,10 +61,22 @@ inline bool isNAN(float a)
     const int32_t *ia = (const int32_t *) &a;
     return (*ia) == NaN ? true : false;
 }
-result_t validate128(__m128i a, __m128i b);
-result_t validate128(__m128d a, __m128d b);
+template <typename T>
+result_t validate128(T a, T b)
+{
+    const int32_t *t1 = (const int32_t *) &a;
+    const int32_t *t2 = (const int32_t *) &b;
+
+    ASSERT_RETURN(t1[0] == t2[0]);
+    ASSERT_RETURN(t1[1] == t2[1]);
+    ASSERT_RETURN(t1[2] == t2[2]);
+    ASSERT_RETURN(t1[3] == t2[3]);
+    return TEST_SUCCESS;
+}
 result_t validateInt64(__m128i a, int64_t i0, int64_t i1);
+result_t validateInt64(__m64 a, int64_t i0);
 result_t validateUInt64(__m128i a, uint64_t u0, uint64_t u1);
+result_t validateUInt64(__m64 a, uint64_t i0);
 result_t validateInt32(__m128i a,
                        int32_t i0,
                        int32_t i1,
@@ -75,6 +87,7 @@ result_t validateUInt32(__m128i a,
                         uint32_t u1,
                         uint32_t u2,
                         uint32_t u3);
+result_t validateUInt32(__m64 a, uint32_t u0, uint32_t u1);
 result_t validateInt32(__m64 a, int32_t u0, int32_t u1);
 result_t validateInt16(__m128i a,
                        int16_t i0,
@@ -117,6 +130,15 @@ result_t validateInt8(__m128i a,
                       int8_t i13,
                       int8_t i14,
                       int8_t i15);
+result_t validateInt8(__m64 a,
+                      int8_t i0,
+                      int8_t i1,
+                      int8_t i2,
+                      int8_t i3,
+                      int8_t i4,
+                      int8_t i5,
+                      int8_t i6,
+                      int8_t i7);
 result_t validateUInt8(__m128i a,
                        uint8_t u0,
                        uint8_t u1,
@@ -152,6 +174,12 @@ result_t validateFloatEpsilon(__m128 a,
                               float f2,
                               float f3,
                               float epsilon);
+result_t validateFloatError(__m128 a,
+                            float f0,
+                            float f1,
+                            float f2,
+                            float f3,
+                            float err);
 result_t validateDouble(__m128d a, double d0, double d1);
 }  // namespace SSE2NEON
 
