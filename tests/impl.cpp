@@ -161,34 +161,67 @@ public:
 
 const char *instructionString[] = {INTRIN_FOREACH(STR)};
 
-// Do a round operation that produces results the same as SSE instructions
+// Produce rounding which is the same as SSE instructions with _MM_ROUND_NEAREST
+// rounding mode
 static inline float bankersRounding(float val)
 {
     if (val < 0)
         return -bankersRounding(-val);
 
     float ret;
-    int32_t truncateInteger = int32_t(val);
-    int32_t roundInteger = int32_t(val + 0.5f);
-    float diff1 = val - float(truncateInteger);  // Truncate value
-    float diff2 = val - float(roundInteger);     // Round up value
-    if (diff2 < 0)
-        diff2 *= -1;  // get the positive difference from the round up value
-    // If it's closest to the truncate integer; then use it
-    if (diff1 < diff2) {
-        ret = float(truncateInteger);
-    } else if (diff2 <
-               diff1) {  // if it's closest to the round-up integer; use it
-        ret = float(roundInteger);
+    float roundDown = floorf(val);  // Round down value
+    float roundUp = ceilf(val);     // Round up value
+    float diffDown = val - roundDown;
+    float diffUp = roundUp - val;
+
+    if (diffDown < diffUp) {
+        /* If it's closer to the round down value, then use it */
+        ret = roundDown;
+    } else if (diffDown > diffUp) {
+        /* If it's closer to the round up value, then use it */
+        ret = roundUp;
     } else {
-        // If it's equidistant between rounding up and rounding down, pick the
-        // one which is an even number
-        if (truncateInteger &
-            1) {  // If truncate is odd, then return the rounded integer
-            ret = float(roundInteger);
+        /* If it's equidistant between round up and round down value, pick the
+         * one which is an even number */
+        float half = roundDown / 2;
+        if (half != floorf(half)) {
+            /* If the round down value is odd, return the round up value */
+            ret = roundUp;
         } else {
-            // If the rounded up value is odd, use return the truncated integer
-            ret = float(truncateInteger);
+            /* If the round up value is odd, return the round down value */
+            ret = roundDown;
+        }
+    }
+    return ret;
+}
+
+static inline double bankersRounding(double val)
+{
+    if (val < 0)
+        return -bankersRounding(-val);
+
+    double ret;
+    double roundDown = floor(val);  // Round down value
+    double roundUp = ceil(val);     // Round up value
+    double diffDown = val - roundDown;
+    double diffUp = roundUp - val;
+
+    if (diffDown < diffUp) {
+        /* If it's closer to the round down value, then use it */
+        ret = roundDown;
+    } else if (diffDown > diffUp) {
+        /* If it's closer to the round up value, then use it */
+        ret = roundUp;
+    } else {
+        /* If it's equidistant between round up and round down value, pick the
+         * one which is an even number */
+        double half = roundDown / 2;
+        if (half != floor(half)) {
+            /* If the round down value is odd, return the round up value */
+            ret = roundUp;
+        } else {
+            /* If the round up value is odd, return the round down value */
+            ret = roundDown;
         }
     }
     return ret;
@@ -1256,17 +1289,25 @@ result_t test_mm_cvt_ps2pi(const SSE2NEONTestImpl &impl, uint32_t i)
     const float *_a = impl.mTestFloatPointer1;
     int32_t d[2];
 
-    for (int i = 0; i < 2; i++) {
-        int32_t f = (int32_t) floor(_a[i]);
-        int32_t c = (int32_t) ceil(_a[i]);
-        float diff = _a[i] - floor(_a[i]);
-        // Round to nearest, ties to even
-        if (diff > 0.5)
-            d[i] = c;
-        else if (diff == 0.5)
-            d[i] = c & 1 ? f : c;
-        else
-            d[i] = f;
+    for (int idx = 0; idx < 2; idx++) {
+        switch (i & 0x3) {
+        case 0:
+            _MM_SET_ROUNDING_MODE(_MM_ROUND_NEAREST);
+            d[idx] = (int32_t)(bankersRounding(_a[idx]));
+            break;
+        case 1:
+            _MM_SET_ROUNDING_MODE(_MM_ROUND_DOWN);
+            d[idx] = (int32_t)(floorf(_a[idx]));
+            break;
+        case 2:
+            _MM_SET_ROUNDING_MODE(_MM_ROUND_UP);
+            d[idx] = (int32_t)(ceilf(_a[idx]));
+            break;
+        case 3:
+            _MM_SET_ROUNDING_MODE(_MM_ROUND_TOWARD_ZERO);
+            d[idx] = (int32_t)(_a[idx]);
+            break;
+        }
     }
 
     __m128 a = do_mm_load_ps(_a);
@@ -1295,16 +1336,25 @@ result_t test_mm_cvt_ss2si(const SSE2NEONTestImpl &impl, uint32_t i)
 {
     const float *_a = impl.mTestFloatPointer1;
     int32_t d0;
-    int32_t f = (int32_t) floor(_a[0]);
-    int32_t c = (int32_t) ceil(_a[0]);
-    float diff = _a[0] - floor(_a[0]);
-    // Round to nearest, ties to even
-    if (diff > 0.5)
-        d0 = c;
-    else if (diff == 0.5)
-        d0 = c & 1 ? f : c;
-    else
-        d0 = f;
+
+    switch (i & 0x3) {
+    case 0:
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_NEAREST);
+        d0 = (int32_t)(bankersRounding(_a[0]));
+        break;
+    case 1:
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_DOWN);
+        d0 = (int32_t)(floorf(_a[0]));
+        break;
+    case 2:
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_UP);
+        d0 = (int32_t)(ceilf(_a[0]));
+        break;
+    case 3:
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_TOWARD_ZERO);
+        d0 = (int32_t)(_a[0]);
+        break;
+    }
 
     __m128 a = do_mm_load_ps(_a);
     int32_t ret = _mm_cvt_ss2si(a);
@@ -1381,6 +1431,8 @@ result_t test_mm_cvtps_pi16(const SSE2NEONTestImpl &impl, uint32_t i)
     float _b[4];
     int16_t trun[4];
 
+    // FIXME: The rounding mode would affect the testing result
+    _MM_SET_ROUNDING_MODE(_MM_ROUND_NEAREST);
     // Beyond int16_t range _mm_cvtps_pi16 function (both native and arm)
     // do not behave the same as BankersRounding.
     // Forcing the float input values to be in the int16_t range
@@ -1656,11 +1708,26 @@ result_t test_mm_extract_pi16(const SSE2NEONTestImpl &impl, uint32_t i)
     // information
 #if defined(__clang__)
     uint64_t *_a = (uint64_t *) impl.mTestIntPointer1;
-    const int imm = 1;
+    const int idx = i & 0x3;
 
     __m64 a = do_mm_load_m64((const int64_t *) _a);
-    int32_t c = _mm_extract_pi16(a, imm);
-    ASSERT_RETURN((uint64_t) c == ((*_a >> ((imm & 0x3) * 16)) & 0xFFFF));
+    int c;
+    switch (idx) {
+    case 0:
+        c = _mm_extract_pi16(a, 0);
+        break;
+    case 1:
+        c = _mm_extract_pi16(a, 1);
+        break;
+    case 2:
+        c = _mm_extract_pi16(a, 2);
+        break;
+    case 3:
+        c = _mm_extract_pi16(a, 3);
+        break;
+    }
+
+    ASSERT_RETURN((uint64_t) c == ((*_a >> (idx * 16)) & 0xFFFF));
     ASSERT_RETURN(0 == ((uint64_t) c & 0xFFFF0000));
     return TEST_SUCCESS;
 #else
@@ -1671,6 +1738,25 @@ result_t test_mm_extract_pi16(const SSE2NEONTestImpl &impl, uint32_t i)
 result_t test_mm_free(const SSE2NEONTestImpl &impl, uint32_t i)
 {
     return TEST_UNIMPL;
+}
+
+result_t test_mm_get_rounding_mode(const SSE2NEONTestImpl &impl, uint32_t i)
+{
+    int res_toward_zero, res_to_neg_inf, res_to_pos_inf, res_nearest;
+    _MM_SET_ROUNDING_MODE(_MM_ROUND_TOWARD_ZERO);
+    res_toward_zero = _MM_GET_ROUNDING_MODE() == _MM_ROUND_TOWARD_ZERO ? 1 : 0;
+    _MM_SET_ROUNDING_MODE(_MM_ROUND_DOWN);
+    res_to_neg_inf = _MM_GET_ROUNDING_MODE() == _MM_ROUND_DOWN ? 1 : 0;
+    _MM_SET_ROUNDING_MODE(_MM_ROUND_UP);
+    res_to_pos_inf = _MM_GET_ROUNDING_MODE() == _MM_ROUND_UP ? 1 : 0;
+    _MM_SET_ROUNDING_MODE(_MM_ROUND_NEAREST);
+    res_nearest = _MM_GET_ROUNDING_MODE() == _MM_ROUND_NEAREST ? 1 : 0;
+
+    if (res_toward_zero && res_to_neg_inf && res_to_pos_inf && res_nearest) {
+        return TEST_SUCCESS;
+    } else {
+        return TEST_FAIL;
+    }
 }
 
 result_t test_mm_getcsr(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -2199,7 +2285,7 @@ result_t test_m_psadbw(const SSE2NEONTestImpl &impl, uint32_t i)
 
     __m64 a = do_mm_load_m64((const int64_t *) _a);
     __m64 b = do_mm_load_m64((const int64_t *) _b);
-    __m64 c = _mm_sad_pu8(a, b);
+    __m64 c = _m_psadbw(a, b);
     return validateUInt16(c, d, 0, 0, 0);
 }
 
@@ -2254,7 +2340,19 @@ result_t test_mm_rsqrt_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_rsqrt_ss(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const float *_a = (const float *) impl.mTestFloatPointer1;
+
+    float f0 = 1 / sqrt(_a[0]);
+    float f1 = _a[1];
+    float f2 = _a[2];
+    float f3 = _a[3];
+
+    __m128 a = do_mm_load_ps(_a);
+    __m128 c = _mm_rsqrt_ss(a);
+
+    // Here, we ensure `_mm_rsqrt_ps()`'s error is under 1% compares to the C
+    // implementation.
+    return validateFloatError(c, f0, f1, f2, f3, 0.01f);
 }
 
 result_t test_mm_sad_pu8(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -2299,38 +2397,25 @@ result_t test_mm_set_rounding_mode(const SSE2NEONTestImpl &impl, uint32_t i)
     __m128 a = do_mm_load_ps(_a);
     __m128 b, c;
 
-// _MM_ROUND_TOWARD_ZERO has not the expected behavior on aarch32
-#if defined(__arm__)
-    res_toward_zero = TEST_SUCCESS;
-#else
     _MM_SET_ROUNDING_MODE(_MM_ROUND_TOWARD_ZERO);
     b = _mm_round_ps(a, _MM_FROUND_CUR_DIRECTION);
     c = _mm_round_ps(a, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
-    res_toward_zero =
-        validateFloatEpsilon(c, ((float *) &b)[0], ((float *) &b)[1],
-                             ((float *) &b)[2], ((float *) &b)[3], 5.0f);
-#endif
+    res_toward_zero = validate128(c, b);
 
     _MM_SET_ROUNDING_MODE(_MM_ROUND_DOWN);
     b = _mm_round_ps(a, _MM_FROUND_CUR_DIRECTION);
     c = _mm_round_ps(a, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
-    res_to_neg_inf =
-        validateFloatEpsilon(c, ((float *) &b)[0], ((float *) &b)[1],
-                             ((float *) &b)[2], ((float *) &b)[3], 5.0f);
+    res_to_neg_inf = validate128(c, b);
 
     _MM_SET_ROUNDING_MODE(_MM_ROUND_UP);
     b = _mm_round_ps(a, _MM_FROUND_CUR_DIRECTION);
     c = _mm_round_ps(a, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
-    res_to_pos_inf =
-        validateFloatEpsilon(c, ((float *) &b)[0], ((float *) &b)[1],
-                             ((float *) &b)[2], ((float *) &b)[3], 5.0f);
+    res_to_pos_inf = validate128(c, b);
 
     _MM_SET_ROUNDING_MODE(_MM_ROUND_NEAREST);
     b = _mm_round_ps(a, _MM_FROUND_CUR_DIRECTION);
     c = _mm_round_ps(a, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-    res_nearest =
-        validateFloatEpsilon(c, ((float *) &b)[0], ((float *) &b)[1],
-                             ((float *) &b)[2], ((float *) &b)[3], 5.0f);
+    res_nearest = validate128(c, b);
 
     if (res_toward_zero == TEST_SUCCESS && res_to_neg_inf == TEST_SUCCESS &&
         res_to_pos_inf == TEST_SUCCESS && res_nearest == TEST_SUCCESS) {
@@ -2458,12 +2543,36 @@ result_t test_mm_shuffle_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_sqrt_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const float *_a = (const float *) impl.mTestFloatPointer1;
+
+    float f0 = sqrt(_a[0]);
+    float f1 = sqrt(_a[1]);
+    float f2 = sqrt(_a[2]);
+    float f3 = sqrt(_a[3]);
+
+    __m128 a = do_mm_load_ps(_a);
+    __m128 c = _mm_sqrt_ps(a);
+
+    // Here, we ensure `_mm_sqrt_ps()`'s error is under 1% compares to the C
+    // implementation.
+    return validateFloatError(c, f0, f1, f2, f3, 0.01f);
 }
 
 result_t test_mm_sqrt_ss(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const float *_a = (const float *) impl.mTestFloatPointer1;
+
+    float f0 = sqrt(_a[0]);
+    float f1 = _a[1];
+    float f2 = _a[2];
+    float f3 = _a[3];
+
+    __m128 a = do_mm_load_ps(_a);
+    __m128 c = _mm_sqrt_ss(a);
+
+    // Here, we ensure `_mm_sqrt_ps()`'s error is under 1% compares to the C
+    // implementation.
+    return validateFloatError(c, f0, f1, f2, f3, 0.01f);
 }
 
 result_t test_mm_store_ps(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -2610,7 +2719,12 @@ result_t test_mm_storeu_si64(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_stream_pi(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const int64_t *_a = (const int64_t *) impl.mTestIntPointer1;
+    __m64 a = do_mm_load_m64(_a);
+    __m64 p;
+
+    _mm_stream_pi(&p, a);
+    return validateInt64(p, _a[0]);
 }
 
 result_t test_mm_stream_ps(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -3252,14 +3366,14 @@ result_t test_mm_cmpeq_epi16(const SSE2NEONTestImpl &impl, uint32_t i)
 {
     const int16_t *_a = (const int16_t *) impl.mTestIntPointer1;
     const int16_t *_b = (const int16_t *) impl.mTestIntPointer2;
-    int16_t d0 = (_a[0] == _b[0]) ? 0xffff : 0x0;
-    int16_t d1 = (_a[1] == _b[1]) ? 0xffff : 0x0;
-    int16_t d2 = (_a[2] == _b[2]) ? 0xffff : 0x0;
-    int16_t d3 = (_a[3] == _b[3]) ? 0xffff : 0x0;
-    int16_t d4 = (_a[4] == _b[4]) ? 0xffff : 0x0;
-    int16_t d5 = (_a[5] == _b[5]) ? 0xffff : 0x0;
-    int16_t d6 = (_a[6] == _b[6]) ? 0xffff : 0x0;
-    int16_t d7 = (_a[7] == _b[7]) ? 0xffff : 0x0;
+    int16_t d0 = (_a[0] == _b[0]) ? ~UINT16_C(0) : 0x0;
+    int16_t d1 = (_a[1] == _b[1]) ? ~UINT16_C(0) : 0x0;
+    int16_t d2 = (_a[2] == _b[2]) ? ~UINT16_C(0) : 0x0;
+    int16_t d3 = (_a[3] == _b[3]) ? ~UINT16_C(0) : 0x0;
+    int16_t d4 = (_a[4] == _b[4]) ? ~UINT16_C(0) : 0x0;
+    int16_t d5 = (_a[5] == _b[5]) ? ~UINT16_C(0) : 0x0;
+    int16_t d6 = (_a[6] == _b[6]) ? ~UINT16_C(0) : 0x0;
+    int16_t d7 = (_a[7] == _b[7]) ? ~UINT16_C(0) : 0x0;
 
     __m128i a = do_mm_load_ps((const int32_t *) _a);
     __m128i b = do_mm_load_ps((const int32_t *) _b);
@@ -3272,10 +3386,10 @@ result_t test_mm_cmpeq_epi32(const SSE2NEONTestImpl &impl, uint32_t i)
     const int32_t *_a = impl.mTestIntPointer1;
     const int32_t *_b = impl.mTestIntPointer2;
 
-    int32_t d0 = (_a[0] == _b[0]) ? 0xffffffff : 0x0;
-    int32_t d1 = (_a[1] == _b[1]) ? 0xffffffff : 0x0;
-    int32_t d2 = (_a[2] == _b[2]) ? 0xffffffff : 0x0;
-    int32_t d3 = (_a[3] == _b[3]) ? 0xffffffff : 0x0;
+    int32_t d0 = (_a[0] == _b[0]) ? ~UINT32_C(0) : 0x0;
+    int32_t d1 = (_a[1] == _b[1]) ? ~UINT32_C(0) : 0x0;
+    int32_t d2 = (_a[2] == _b[2]) ? ~UINT32_C(0) : 0x0;
+    int32_t d3 = (_a[3] == _b[3]) ? ~UINT32_C(0) : 0x0;
 
     __m128i a = do_mm_load_ps(_a);
     __m128i b = do_mm_load_ps(_b);
@@ -3288,22 +3402,22 @@ result_t test_mm_cmpeq_epi8(const SSE2NEONTestImpl &impl, uint32_t i)
 {
     const int8_t *_a = (const int8_t *) impl.mTestIntPointer1;
     const int8_t *_b = (const int8_t *) impl.mTestIntPointer2;
-    int8_t d0 = (_a[0] == _b[0]) ? 0xff : 0x00;
-    int8_t d1 = (_a[1] == _b[1]) ? 0xff : 0x00;
-    int8_t d2 = (_a[2] == _b[2]) ? 0xff : 0x00;
-    int8_t d3 = (_a[3] == _b[3]) ? 0xff : 0x00;
-    int8_t d4 = (_a[4] == _b[4]) ? 0xff : 0x00;
-    int8_t d5 = (_a[5] == _b[5]) ? 0xff : 0x00;
-    int8_t d6 = (_a[6] == _b[6]) ? 0xff : 0x00;
-    int8_t d7 = (_a[7] == _b[7]) ? 0xff : 0x00;
-    int8_t d8 = (_a[8] == _b[8]) ? 0xff : 0x00;
-    int8_t d9 = (_a[9] == _b[9]) ? 0xff : 0x00;
-    int8_t d10 = (_a[10] == _b[10]) ? 0xff : 0x00;
-    int8_t d11 = (_a[11] == _b[11]) ? 0xff : 0x00;
-    int8_t d12 = (_a[12] == _b[12]) ? 0xff : 0x00;
-    int8_t d13 = (_a[13] == _b[13]) ? 0xff : 0x00;
-    int8_t d14 = (_a[14] == _b[14]) ? 0xff : 0x00;
-    int8_t d15 = (_a[15] == _b[15]) ? 0xff : 0x00;
+    int8_t d0 = (_a[0] == _b[0]) ? ~UINT8_C(0) : 0x00;
+    int8_t d1 = (_a[1] == _b[1]) ? ~UINT8_C(0) : 0x00;
+    int8_t d2 = (_a[2] == _b[2]) ? ~UINT8_C(0) : 0x00;
+    int8_t d3 = (_a[3] == _b[3]) ? ~UINT8_C(0) : 0x00;
+    int8_t d4 = (_a[4] == _b[4]) ? ~UINT8_C(0) : 0x00;
+    int8_t d5 = (_a[5] == _b[5]) ? ~UINT8_C(0) : 0x00;
+    int8_t d6 = (_a[6] == _b[6]) ? ~UINT8_C(0) : 0x00;
+    int8_t d7 = (_a[7] == _b[7]) ? ~UINT8_C(0) : 0x00;
+    int8_t d8 = (_a[8] == _b[8]) ? ~UINT8_C(0) : 0x00;
+    int8_t d9 = (_a[9] == _b[9]) ? ~UINT8_C(0) : 0x00;
+    int8_t d10 = (_a[10] == _b[10]) ? ~UINT8_C(0) : 0x00;
+    int8_t d11 = (_a[11] == _b[11]) ? ~UINT8_C(0) : 0x00;
+    int8_t d12 = (_a[12] == _b[12]) ? ~UINT8_C(0) : 0x00;
+    int8_t d13 = (_a[13] == _b[13]) ? ~UINT8_C(0) : 0x00;
+    int8_t d14 = (_a[14] == _b[14]) ? ~UINT8_C(0) : 0x00;
+    int8_t d15 = (_a[15] == _b[15]) ? ~UINT8_C(0) : 0x00;
 
     __m128i a = do_mm_load_ps((const int32_t *) _a);
     __m128i b = do_mm_load_ps((const int32_t *) _b);
@@ -3327,31 +3441,58 @@ result_t test_mm_cmpeq_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_cmpeq_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+    const double *_b = (const double *) impl.mTestFloatPointer2;
+    const uint64_t d0 = (_a[0] == _b[0]) ? ~UINT64_C(0) : 0;
+    const uint64_t d1 = ((const uint64_t *) _a)[1];
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_cmpeq_sd(a, b);
+
+    return validateDouble(c, *(const double *) &d0, *(const double *) &d1);
 }
 
 result_t test_mm_cmpge_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+    const double *_b = (const double *) impl.mTestFloatPointer2;
+    uint64_t d0 = (_a[0] >= _b[0]) ? ~UINT64_C(0) : 0;
+    uint64_t d1 = (_a[1] >= _b[1]) ? ~UINT64_C(0) : 0;
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_cmpge_pd(a, b);
+
+    return validateDouble(c, *(double *) &d0, *(double *) &d1);
 }
 
 result_t test_mm_cmpge_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    double *_a = (double *) impl.mTestFloatPointer1;
+    double *_b = (double *) impl.mTestFloatPointer2;
+    uint64_t d0 = (_a[0] >= _b[0]) ? ~UINT64_C(0) : 0;
+    uint64_t d1 = ((uint64_t *) _a)[1];
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_cmpge_sd(a, b);
+
+    return validateDouble(c, *(double *) &d0, *(double *) &d1);
 }
 
 result_t test_mm_cmpgt_epi16(const SSE2NEONTestImpl &impl, uint32_t i)
 {
     const int16_t *_a = (const int16_t *) impl.mTestIntPointer1;
     const int16_t *_b = (const int16_t *) impl.mTestIntPointer2;
-    uint16_t d0 = _a[0] > _b[0] ? 0xffff : 0;
-    uint16_t d1 = _a[1] > _b[1] ? 0xffff : 0;
-    uint16_t d2 = _a[2] > _b[2] ? 0xffff : 0;
-    uint16_t d3 = _a[3] > _b[3] ? 0xffff : 0;
-    uint16_t d4 = _a[4] > _b[4] ? 0xffff : 0;
-    uint16_t d5 = _a[5] > _b[5] ? 0xffff : 0;
-    uint16_t d6 = _a[6] > _b[6] ? 0xffff : 0;
-    uint16_t d7 = _a[7] > _b[7] ? 0xffff : 0;
+    uint16_t d0 = _a[0] > _b[0] ? ~UINT16_C(0) : 0;
+    uint16_t d1 = _a[1] > _b[1] ? ~UINT16_C(0) : 0;
+    uint16_t d2 = _a[2] > _b[2] ? ~UINT16_C(0) : 0;
+    uint16_t d3 = _a[3] > _b[3] ? ~UINT16_C(0) : 0;
+    uint16_t d4 = _a[4] > _b[4] ? ~UINT16_C(0) : 0;
+    uint16_t d5 = _a[5] > _b[5] ? ~UINT16_C(0) : 0;
+    uint16_t d6 = _a[6] > _b[6] ? ~UINT16_C(0) : 0;
+    uint16_t d7 = _a[7] > _b[7] ? ~UINT16_C(0) : 0;
 
     __m128i a = do_mm_load_ps((const int32_t *) _a);
     __m128i b = do_mm_load_ps((const int32_t *) _b);
@@ -3382,22 +3523,22 @@ result_t test_mm_cmpgt_epi8(const SSE2NEONTestImpl &impl, uint32_t i)
 {
     const int8_t *_a = (const int8_t *) impl.mTestIntPointer1;
     const int8_t *_b = (const int8_t *) impl.mTestIntPointer2;
-    int8_t d0 = (_a[0] > _b[0]) ? 0xff : 0x00;
-    int8_t d1 = (_a[1] > _b[1]) ? 0xff : 0x00;
-    int8_t d2 = (_a[2] > _b[2]) ? 0xff : 0x00;
-    int8_t d3 = (_a[3] > _b[3]) ? 0xff : 0x00;
-    int8_t d4 = (_a[4] > _b[4]) ? 0xff : 0x00;
-    int8_t d5 = (_a[5] > _b[5]) ? 0xff : 0x00;
-    int8_t d6 = (_a[6] > _b[6]) ? 0xff : 0x00;
-    int8_t d7 = (_a[7] > _b[7]) ? 0xff : 0x00;
-    int8_t d8 = (_a[8] > _b[8]) ? 0xff : 0x00;
-    int8_t d9 = (_a[9] > _b[9]) ? 0xff : 0x00;
-    int8_t d10 = (_a[10] > _b[10]) ? 0xff : 0x00;
-    int8_t d11 = (_a[11] > _b[11]) ? 0xff : 0x00;
-    int8_t d12 = (_a[12] > _b[12]) ? 0xff : 0x00;
-    int8_t d13 = (_a[13] > _b[13]) ? 0xff : 0x00;
-    int8_t d14 = (_a[14] > _b[14]) ? 0xff : 0x00;
-    int8_t d15 = (_a[15] > _b[15]) ? 0xff : 0x00;
+    int8_t d0 = (_a[0] > _b[0]) ? ~UINT8_C(0) : 0x00;
+    int8_t d1 = (_a[1] > _b[1]) ? ~UINT8_C(0) : 0x00;
+    int8_t d2 = (_a[2] > _b[2]) ? ~UINT8_C(0) : 0x00;
+    int8_t d3 = (_a[3] > _b[3]) ? ~UINT8_C(0) : 0x00;
+    int8_t d4 = (_a[4] > _b[4]) ? ~UINT8_C(0) : 0x00;
+    int8_t d5 = (_a[5] > _b[5]) ? ~UINT8_C(0) : 0x00;
+    int8_t d6 = (_a[6] > _b[6]) ? ~UINT8_C(0) : 0x00;
+    int8_t d7 = (_a[7] > _b[7]) ? ~UINT8_C(0) : 0x00;
+    int8_t d8 = (_a[8] > _b[8]) ? ~UINT8_C(0) : 0x00;
+    int8_t d9 = (_a[9] > _b[9]) ? ~UINT8_C(0) : 0x00;
+    int8_t d10 = (_a[10] > _b[10]) ? ~UINT8_C(0) : 0x00;
+    int8_t d11 = (_a[11] > _b[11]) ? ~UINT8_C(0) : 0x00;
+    int8_t d12 = (_a[12] > _b[12]) ? ~UINT8_C(0) : 0x00;
+    int8_t d13 = (_a[13] > _b[13]) ? ~UINT8_C(0) : 0x00;
+    int8_t d14 = (_a[14] > _b[14]) ? ~UINT8_C(0) : 0x00;
+    int8_t d15 = (_a[15] > _b[15]) ? ~UINT8_C(0) : 0x00;
 
     __m128i a = do_mm_load_ps((const int32_t *) _a);
     __m128i b = do_mm_load_ps((const int32_t *) _b);
@@ -3408,36 +3549,72 @@ result_t test_mm_cmpgt_epi8(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_cmpgt_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+    const double *_b = (const double *) impl.mTestFloatPointer2;
+    uint64_t d0 = (_a[0] > _b[0]) ? ~UINT64_C(0) : 0;
+    uint64_t d1 = (_a[1] > _b[1]) ? ~UINT64_C(0) : 0;
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_cmpgt_pd(a, b);
+
+    return validateDouble(c, *(double *) &d0, *(double *) &d1);
 }
 
 result_t test_mm_cmpgt_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    double *_a = (double *) impl.mTestFloatPointer1;
+    double *_b = (double *) impl.mTestFloatPointer2;
+    uint64_t d0 = (_a[0] > _b[0]) ? ~UINT64_C(0) : 0;
+    uint64_t d1 = ((uint64_t *) _a)[1];
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_cmpgt_sd(a, b);
+
+    return validateDouble(c, *(double *) &d0, *(double *) &d1);
 }
 
 result_t test_mm_cmple_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+    const double *_b = (const double *) impl.mTestFloatPointer2;
+    uint64_t d0 = (_a[0] <= _b[0]) ? ~UINT64_C(0) : 0;
+    uint64_t d1 = (_a[1] <= _b[1]) ? ~UINT64_C(0) : 0;
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_cmple_pd(a, b);
+
+    return validateDouble(c, *(double *) &d0, *(double *) &d1);
 }
 
 result_t test_mm_cmple_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    double *_a = (double *) impl.mTestFloatPointer1;
+    double *_b = (double *) impl.mTestFloatPointer2;
+    uint64_t d0 = (_a[0] <= _b[0]) ? ~UINT64_C(0) : 0;
+    uint64_t d1 = ((uint64_t *) _a)[1];
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_cmple_sd(a, b);
+
+    return validateDouble(c, *(double *) &d0, *(double *) &d1);
 }
 
 result_t test_mm_cmplt_epi16(const SSE2NEONTestImpl &impl, uint32_t i)
 {
     const int16_t *_a = (const int16_t *) impl.mTestIntPointer1;
     const int16_t *_b = (const int16_t *) impl.mTestIntPointer2;
-    uint16_t d0 = _a[0] < _b[0] ? 0xffff : 0;
-    uint16_t d1 = _a[1] < _b[1] ? 0xffff : 0;
-    uint16_t d2 = _a[2] < _b[2] ? 0xffff : 0;
-    uint16_t d3 = _a[3] < _b[3] ? 0xffff : 0;
-    uint16_t d4 = _a[4] < _b[4] ? 0xffff : 0;
-    uint16_t d5 = _a[5] < _b[5] ? 0xffff : 0;
-    uint16_t d6 = _a[6] < _b[6] ? 0xffff : 0;
-    uint16_t d7 = _a[7] < _b[7] ? 0xffff : 0;
+    uint16_t d0 = _a[0] < _b[0] ? ~UINT16_C(0) : 0;
+    uint16_t d1 = _a[1] < _b[1] ? ~UINT16_C(0) : 0;
+    uint16_t d2 = _a[2] < _b[2] ? ~UINT16_C(0) : 0;
+    uint16_t d3 = _a[3] < _b[3] ? ~UINT16_C(0) : 0;
+    uint16_t d4 = _a[4] < _b[4] ? ~UINT16_C(0) : 0;
+    uint16_t d5 = _a[5] < _b[5] ? ~UINT16_C(0) : 0;
+    uint16_t d6 = _a[6] < _b[6] ? ~UINT16_C(0) : 0;
+    uint16_t d7 = _a[7] < _b[7] ? ~UINT16_C(0) : 0;
 
     __m128i a = do_mm_load_ps((const int32_t *) _a);
     __m128i b = do_mm_load_ps((const int32_t *) _b);
@@ -3467,22 +3644,22 @@ result_t test_mm_cmplt_epi8(const SSE2NEONTestImpl &impl, uint32_t i)
 {
     const int8_t *_a = (const int8_t *) impl.mTestIntPointer1;
     const int8_t *_b = (const int8_t *) impl.mTestIntPointer2;
-    int8_t d0 = (_a[0] < _b[0]) ? 0xff : 0x00;
-    int8_t d1 = (_a[1] < _b[1]) ? 0xff : 0x00;
-    int8_t d2 = (_a[2] < _b[2]) ? 0xff : 0x00;
-    int8_t d3 = (_a[3] < _b[3]) ? 0xff : 0x00;
-    int8_t d4 = (_a[4] < _b[4]) ? 0xff : 0x00;
-    int8_t d5 = (_a[5] < _b[5]) ? 0xff : 0x00;
-    int8_t d6 = (_a[6] < _b[6]) ? 0xff : 0x00;
-    int8_t d7 = (_a[7] < _b[7]) ? 0xff : 0x00;
-    int8_t d8 = (_a[8] < _b[8]) ? 0xff : 0x00;
-    int8_t d9 = (_a[9] < _b[9]) ? 0xff : 0x00;
-    int8_t d10 = (_a[10] < _b[10]) ? 0xff : 0x00;
-    int8_t d11 = (_a[11] < _b[11]) ? 0xff : 0x00;
-    int8_t d12 = (_a[12] < _b[12]) ? 0xff : 0x00;
-    int8_t d13 = (_a[13] < _b[13]) ? 0xff : 0x00;
-    int8_t d14 = (_a[14] < _b[14]) ? 0xff : 0x00;
-    int8_t d15 = (_a[15] < _b[15]) ? 0xff : 0x00;
+    int8_t d0 = (_a[0] < _b[0]) ? ~UINT8_C(0) : 0x00;
+    int8_t d1 = (_a[1] < _b[1]) ? ~UINT8_C(0) : 0x00;
+    int8_t d2 = (_a[2] < _b[2]) ? ~UINT8_C(0) : 0x00;
+    int8_t d3 = (_a[3] < _b[3]) ? ~UINT8_C(0) : 0x00;
+    int8_t d4 = (_a[4] < _b[4]) ? ~UINT8_C(0) : 0x00;
+    int8_t d5 = (_a[5] < _b[5]) ? ~UINT8_C(0) : 0x00;
+    int8_t d6 = (_a[6] < _b[6]) ? ~UINT8_C(0) : 0x00;
+    int8_t d7 = (_a[7] < _b[7]) ? ~UINT8_C(0) : 0x00;
+    int8_t d8 = (_a[8] < _b[8]) ? ~UINT8_C(0) : 0x00;
+    int8_t d9 = (_a[9] < _b[9]) ? ~UINT8_C(0) : 0x00;
+    int8_t d10 = (_a[10] < _b[10]) ? ~UINT8_C(0) : 0x00;
+    int8_t d11 = (_a[11] < _b[11]) ? ~UINT8_C(0) : 0x00;
+    int8_t d12 = (_a[12] < _b[12]) ? ~UINT8_C(0) : 0x00;
+    int8_t d13 = (_a[13] < _b[13]) ? ~UINT8_C(0) : 0x00;
+    int8_t d14 = (_a[14] < _b[14]) ? ~UINT8_C(0) : 0x00;
+    int8_t d15 = (_a[15] < _b[15]) ? ~UINT8_C(0) : 0x00;
 
     __m128i a = do_mm_load_ps((const int32_t *) _a);
     __m128i b = do_mm_load_ps((const int32_t *) _b);
@@ -3508,37 +3685,105 @@ result_t test_mm_cmplt_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_cmplt_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    double *_a = (double *) impl.mTestFloatPointer1;
+    double *_b = (double *) impl.mTestFloatPointer2;
+    uint64_t d0 = (_a[0] <= _b[0]) ? ~UINT64_C(0) : 0;
+    uint64_t d1 = ((uint64_t *) _a)[1];
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_cmplt_sd(a, b);
+
+    return validateDouble(c, *(double *) &d0, *(double *) &d1);
 }
 
 result_t test_mm_cmpneq_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+    const double *_b = (const double *) impl.mTestFloatPointer2;
+
+    int64_t f0 = (_a[0] != _b[0]) ? ~UINT64_C(0) : UINT64_C(0);
+    int64_t f1 = (_a[1] != _b[1]) ? ~UINT64_C(0) : UINT64_C(0);
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_cmpneq_pd(a, b);
+
+    return validateDouble(c, *(double *) &f0, *(double *) &f1);
 }
 
 result_t test_mm_cmpneq_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    double *_a = (double *) impl.mTestFloatPointer1;
+    double *_b = (double *) impl.mTestFloatPointer2;
+
+    int64_t f0 = (_a[0] != _b[0]) ? ~UINT64_C(0) : UINT64_C(0);
+    int64_t f1 = ((int64_t *) _a)[1];
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_cmpneq_sd(a, b);
+
+    return validateDouble(c, *(double *) &f0, *(double *) &f1);
 }
 
 result_t test_mm_cmpnge_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+    const double *_b = (const double *) impl.mTestFloatPointer2;
+
+    int64_t f0 = (_a[0] >= _b[0]) ? UINT64_C(0) : ~UINT64_C(0);
+    int64_t f1 = (_a[1] >= _b[1]) ? UINT64_C(0) : ~UINT64_C(0);
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_cmpnge_pd(a, b);
+
+    return validateDouble(c, *(double *) &f0, *(double *) &f1);
 }
 
 result_t test_mm_cmpnge_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    double *_a = (double *) impl.mTestFloatPointer1;
+    double *_b = (double *) impl.mTestFloatPointer2;
+
+    int64_t f0 = (_a[0] >= _b[0]) ? UINT64_C(0) : ~UINT64_C(0);
+    int64_t f1 = ((int64_t *) _a)[1];
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_cmpnge_sd(a, b);
+
+    return validateDouble(c, *(double *) &f0, *(double *) &f1);
 }
 
 result_t test_mm_cmpngt_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+    const double *_b = (const double *) impl.mTestFloatPointer2;
+
+    int64_t f0 = !(_a[0] > _b[0]) ? ~UINT64_C(0) : UINT64_C(0);
+    int64_t f1 = !(_a[1] > _b[1]) ? ~UINT64_C(0) : UINT64_C(0);
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_cmpngt_pd(a, b);
+
+    return validateDouble(c, *(double *) &f0, *(double *) &f1);
 }
 
 result_t test_mm_cmpngt_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    double *_a = (double *) impl.mTestFloatPointer1;
+    double *_b = (double *) impl.mTestFloatPointer2;
+    uint64_t d0 = !(_a[0] > _b[0]) ? ~UINT64_C(0) : 0;
+    uint64_t d1 = ((uint64_t *) _a)[1];
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_cmpngt_sd(a, b);
+
+    return validateDouble(c, *(double *) &d0, *(double *) &d1);
 }
 
 result_t test_mm_cmpnle_pd(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -3583,7 +3828,16 @@ result_t test_mm_cmpunord_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_comieq_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+    const double *_b = (const double *) impl.mTestFloatPointer2;
+    int32_t _c = (_a[0] == _b[0]) ? 1 : 0;
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    int32_t c = _mm_comieq_sd(a, b);
+
+    ASSERT_RETURN(c == _c);
+    return TEST_SUCCESS;
 }
 
 result_t test_mm_comige_sd(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -3658,21 +3912,50 @@ result_t test_mm_cvtpd_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_cvtpi32_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const int32_t *_a = impl.mTestIntPointer1;
+    __m64 a = do_mm_load_m64((const int64_t *) _a);
+
+    double trun[2] = {(double) _a[0], (double) _a[1]};
+
+    __m128d ret = _mm_cvtpi32_pd(a);
+
+    return validateDouble(ret, trun[0], trun[1]);
 }
 
-// https://msdn.microsoft.com/en-us/library/xdc42k5e%28v=vs.90%29.aspx?f=255&MSPPError=-2147217396
 result_t test_mm_cvtps_epi32(const SSE2NEONTestImpl &impl, uint32_t i)
 {
     const float *_a = impl.mTestFloatPointer1;
     __m128 a = do_mm_load_ps(_a);
-    int32_t trun[4];
-    for (uint32_t i = 0; i < 4; i++) {
-        trun[i] = (int32_t)(bankersRounding(_a[i]));
+    int32_t d[4];
+    switch (i & 0x3) {
+    case 0:
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_NEAREST);
+        for (uint32_t i = 0; i < 4; i++) {
+            d[i] = (int32_t)(bankersRounding(_a[i]));
+        }
+        break;
+    case 1:
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_DOWN);
+        for (uint32_t i = 0; i < 4; i++) {
+            d[i] = (int32_t)(floorf(_a[i]));
+        }
+        break;
+    case 2:
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_UP);
+        for (uint32_t i = 0; i < 4; i++) {
+            d[i] = (int32_t)(ceilf(_a[i]));
+        }
+        break;
+    case 3:
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_TOWARD_ZERO);
+        for (uint32_t i = 0; i < 4; i++) {
+            d[i] = (int32_t)(_a[i]);
+        }
+        break;
     }
 
     __m128i ret = _mm_cvtps_epi32(a);
-    return validateInt32(ret, trun[0], trun[1], trun[2], trun[3]);
+    return validateInt32(ret, d[0], d[1], d[2], d[3]);
 }
 
 result_t test_mm_cvtps_pd(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -3892,11 +4175,37 @@ result_t test_mm_div_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 result_t test_mm_extract_epi16(const SSE2NEONTestImpl &impl, uint32_t i)
 {
     uint16_t *_a = (uint16_t *) impl.mTestIntPointer1;
-    const int imm = 1;
-
+    const int idx = i & 0x7;
     __m128i a = do_mm_load_ps((const int32_t *) _a);
-    int c = _mm_extract_epi16(a, imm);
-    ASSERT_RETURN(c == *(_a + imm));
+    int c;
+    switch (idx) {
+    case 0:
+        c = _mm_extract_epi16(a, 0);
+        break;
+    case 1:
+        c = _mm_extract_epi16(a, 1);
+        break;
+    case 2:
+        c = _mm_extract_epi16(a, 2);
+        break;
+    case 3:
+        c = _mm_extract_epi16(a, 3);
+        break;
+    case 4:
+        c = _mm_extract_epi16(a, 4);
+        break;
+    case 5:
+        c = _mm_extract_epi16(a, 5);
+        break;
+    case 6:
+        c = _mm_extract_epi16(a, 6);
+        break;
+    case 7:
+        c = _mm_extract_epi16(a, 7);
+        break;
+    }
+
+    ASSERT_RETURN(c == *(_a + idx));
     return TEST_SUCCESS;
 }
 
@@ -4249,7 +4558,16 @@ result_t test_mm_min_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_min_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+    const double *_b = (const double *) impl.mTestFloatPointer2;
+    double d0 = fmin(_a[0], _b[0]);
+    double d1 = _a[1];
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_min_sd(a, b);
+
+    return validateDouble(c, d0, d1);
 }
 
 result_t test_mm_move_epi64(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -5043,12 +5361,30 @@ result_t test_mm_slli_si128(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_sqrt_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+
+    double f0 = sqrt(_a[0]);
+    double f1 = sqrt(_a[1]);
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d c = _mm_sqrt_pd(a);
+
+    return validateDouble(c, f0, f1);
 }
 
 result_t test_mm_sqrt_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+    const double *_b = (const double *) impl.mTestFloatPointer2;
+
+    double f0 = sqrt(_b[0]);
+    double f1 = _a[1];
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_sqrt_sd(a, b);
+
+    return validateDouble(c, f0, f1);
 }
 
 result_t test_mm_sra_epi16(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -5059,14 +5395,14 @@ result_t test_mm_sra_epi16(const SSE2NEONTestImpl &impl, uint32_t i)
     __m128i b = _mm_set1_epi64x(count);
     __m128i c = _mm_sra_epi16(a, b);
     if (count > 15) {
-        int16_t d0 = _a[0] < 0 ? 0xffff : 0;
-        int16_t d1 = _a[1] < 0 ? 0xffff : 0;
-        int16_t d2 = _a[2] < 0 ? 0xffff : 0;
-        int16_t d3 = _a[3] < 0 ? 0xffff : 0;
-        int16_t d4 = _a[4] < 0 ? 0xffff : 0;
-        int16_t d5 = _a[5] < 0 ? 0xffff : 0;
-        int16_t d6 = _a[6] < 0 ? 0xffff : 0;
-        int16_t d7 = _a[7] < 0 ? 0xffff : 0;
+        int16_t d0 = _a[0] < 0 ? ~UINT16_C(0) : 0;
+        int16_t d1 = _a[1] < 0 ? ~UINT16_C(0) : 0;
+        int16_t d2 = _a[2] < 0 ? ~UINT16_C(0) : 0;
+        int16_t d3 = _a[3] < 0 ? ~UINT16_C(0) : 0;
+        int16_t d4 = _a[4] < 0 ? ~UINT16_C(0) : 0;
+        int16_t d5 = _a[5] < 0 ? ~UINT16_C(0) : 0;
+        int16_t d6 = _a[6] < 0 ? ~UINT16_C(0) : 0;
+        int16_t d7 = _a[7] < 0 ? ~UINT16_C(0) : 0;
 
         return validateInt16(c, d0, d1, d2, d3, d4, d5, d6, d7);
     }
@@ -5091,10 +5427,10 @@ result_t test_mm_sra_epi32(const SSE2NEONTestImpl &impl, uint32_t i)
     __m128i b = _mm_set1_epi64x(count);
     __m128i c = _mm_sra_epi32(a, b);
     if (count > 31) {
-        int32_t d0 = _a[0] < 0 ? 0xffffffff : 0;
-        int32_t d1 = _a[1] < 0 ? 0xffffffff : 0;
-        int32_t d2 = _a[2] < 0 ? 0xffffffff : 0;
-        int32_t d3 = _a[3] < 0 ? 0xffffffff : 0;
+        int32_t d0 = _a[0] < 0 ? ~UINT32_C(0) : 0;
+        int32_t d1 = _a[1] < 0 ? ~UINT32_C(0) : 0;
+        int32_t d2 = _a[2] < 0 ? ~UINT32_C(0) : 0;
+        int32_t d3 = _a[3] < 0 ? ~UINT32_C(0) : 0;
 
         return validateInt32(c, d0, d1, d2, d3);
     }
@@ -5334,7 +5670,14 @@ result_t test_mm_storeh_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_storel_epi64(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    int64_t *p = (int64_t *) impl.mTestIntPointer1;
+    __m128i mem;
+
+    __m128i a = do_mm_load_ps((const int32_t *) p);
+    _mm_storel_epi64(&mem, a);
+
+    ASSERT_RETURN(mem[0] == p[0]);
+    return TEST_SUCCESS;
 }
 
 result_t test_mm_storel_pd(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -5403,17 +5746,35 @@ result_t test_mm_storeu_si32(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_stream_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+    double p[2];
+
+    __m128d a = do_mm_load_pd(_a);
+    _mm_stream_pd(p, a);
+
+    return validateDouble(a, p[0], p[1]);
 }
 
 result_t test_mm_stream_si128(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const int32_t *_a = (const int32_t *) impl.mTestIntPointer1;
+    int32_t p[4];
+
+    __m128i a = do_mm_load_ps((const int32_t *) _a);
+    _mm_stream_si128((__m128i *) p, a);
+
+    return validateInt32(a, p[0], p[1], p[2], p[3]);
 }
 
 result_t test_mm_stream_si32(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const int32_t a = (const int32_t) impl.mTestInts[i];
+    int32_t p;
+
+    _mm_stream_si32(&p, a);
+
+    ASSERT_RETURN(a == p)
+    return TEST_SUCCESS;
 }
 
 result_t test_mm_stream_si64(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -5946,11 +6307,23 @@ result_t test_mm_xor_si128(const SSE2NEONTestImpl &impl, uint32_t i)
 /* SSE3 */
 result_t test_mm_addsub_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+    const double *_b = (const double *) impl.mTestFloatPointer2;
+
+    double d0 = _a[0] - _b[0];
+    double d1 = _a[1] + _b[1];
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d c = _mm_addsub_pd(a, b);
+
+    return validateDouble(c, d0, d1);
 }
 
 result_t test_mm_addsub_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 {
+    // FIXME: The rounding mode would affect the testing result on ARM platform.
+    _MM_SET_ROUNDING_MODE(_MM_ROUND_NEAREST);
     const float *_a = impl.mTestFloatPointer1;
     const float *_b = impl.mTestFloatPointer2;
 
@@ -5983,6 +6356,8 @@ result_t test_mm_hadd_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_hadd_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 {
+    // FIXME: The rounding mode would affect the testing result on ARM platform.
+    _MM_SET_ROUNDING_MODE(_MM_ROUND_NEAREST);
     const float *_a = impl.mTestFloatPointer1;
     const float *_b = impl.mTestFloatPointer2;
 
@@ -6015,6 +6390,8 @@ result_t test_mm_hsub_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_hsub_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 {
+    // FIXME: The rounding mode would affect the testing result on ARM platform.
+    _MM_SET_ROUNDING_MODE(_MM_ROUND_NEAREST);
     const float *_a = impl.mTestFloatPointer1;
     const float *_b = impl.mTestFloatPointer2;
 
@@ -6032,12 +6409,16 @@ result_t test_mm_hsub_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_lddqu_si128(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    return test_mm_loadu_si128(impl, i);
 }
 
 result_t test_mm_loaddup_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *addr = (const double *) impl.mTestFloatPointer1;
+
+    __m128d ret = _mm_loaddup_pd(addr);
+
+    return validateDouble(ret, addr[0], addr[0]);
 }
 
 result_t test_mm_movedup_pd(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -6294,40 +6675,34 @@ result_t test_mm_hadd_pi32(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_hadds_epi16(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    int16_t s16_max = 0x7fff;
     const int16_t *_a = (const int16_t *) impl.mTestIntPointer1;
     const int16_t *_b = (const int16_t *) impl.mTestIntPointer1;
 
-    int16_t d0 = (((int32_t) _a[0] + (int32_t) _a[1]) >= (int32_t) s16_max)
-                     ? s16_max
-                     : (_a[0] + _a[1]);
-    int16_t d1 = (((int32_t) _a[2] + (int32_t) _a[3]) >= (int32_t) s16_max)
-                     ? s16_max
-                     : (_a[2] + _a[3]);
-    int16_t d2 = (((int32_t) _a[4] + (int32_t) _a[5]) >= (int32_t) s16_max)
-                     ? s16_max
-                     : (_a[4] + _a[5]);
-    int16_t d3 = (((int32_t) _a[6] + (int32_t) _a[7]) >= (int32_t) s16_max)
-                     ? s16_max
-                     : (_a[6] + _a[7]);
-    int16_t d4 = (((int32_t) _b[0] + (int32_t) _b[1]) >= (int32_t) s16_max)
-                     ? s16_max
-                     : (_b[0] + _b[1]);
-    int16_t d5 = (((int32_t) _b[2] + (int32_t) _b[3]) >= (int32_t) s16_max)
-                     ? s16_max
-                     : (_b[2] + _b[3]);
-    int16_t d6 = (((int32_t) _b[4] + (int32_t) _b[5]) >= (int32_t) s16_max)
-                     ? s16_max
-                     : (_b[4] + _b[5]);
-    int16_t d7 = (((int32_t) _b[6] + (int32_t) _b[7]) >= (int32_t) s16_max)
-                     ? s16_max
-                     : (_b[6] + _b[7]);
+    int16_t d16[8];
+    int32_t d32[8];
+    d32[0] = (int32_t) _a[0] + (int32_t) _a[1];
+    d32[1] = (int32_t) _a[2] + (int32_t) _a[3];
+    d32[2] = (int32_t) _a[4] + (int32_t) _a[5];
+    d32[3] = (int32_t) _a[6] + (int32_t) _a[7];
+    d32[4] = (int32_t) _b[0] + (int32_t) _b[1];
+    d32[5] = (int32_t) _b[2] + (int32_t) _b[3];
+    d32[6] = (int32_t) _b[4] + (int32_t) _b[5];
+    d32[7] = (int32_t) _b[6] + (int32_t) _b[7];
+    for (int i = 0; i < 8; i++) {
+        if (d32[i] > (int32_t) INT16_MAX)
+            d16[i] = INT16_MAX;
+        else if (d32[i] < (int32_t) INT16_MIN)
+            d16[i] = INT16_MIN;
+        else
+            d16[i] = (int16_t) d32[i];
+    }
 
     __m128i a = do_mm_load_ps((const int32_t *) _a);
     __m128i b = do_mm_load_ps((const int32_t *) _b);
     __m128i c = _mm_hadds_epi16(a, b);
 
-    return validateInt16(c, d0, d1, d2, d3, d4, d5, d6, d7);
+    return validateInt16(c, d16[0], d16[1], d16[2], d16[3], d16[4], d16[5],
+                         d16[6], d16[7]);
 }
 
 result_t test_mm_hadds_pi16(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -6380,45 +6755,49 @@ result_t test_mm_hsub_pi16(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_hsub_pi32(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const int32_t *_a = impl.mTestIntPointer1;
+    const int32_t *_b = impl.mTestIntPointer2;
+
+    int32_t d0 = _a[0] - _a[1];
+    int32_t d1 = _b[0] - _b[1];
+
+    __m64 a = do_mm_load_m64((const int64_t *) _a);
+    __m64 b = do_mm_load_m64((const int64_t *) _b);
+    __m64 c = _mm_hsub_pi32(a, b);
+
+    return validateInt32(c, d0, d1);
 }
 
 result_t test_mm_hsubs_epi16(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    const int16_t s16_min = 0x8000;
     const int16_t *_a = (const int16_t *) impl.mTestIntPointer1;
     const int16_t *_b = (const int16_t *) impl.mTestIntPointer1;
 
-    int16_t d0 = (((int32_t) _a[0] - (int32_t) _a[1]) <= (int32_t) s16_min)
-                     ? s16_min
-                     : ((int32_t) _a[0] - (int32_t) _a[1]);
-    int16_t d1 = (((int32_t) _a[2] - (int32_t) _a[3]) <= (int32_t) s16_min)
-                     ? s16_min
-                     : ((int32_t) _a[2] - (int32_t) _a[3]);
-    int16_t d2 = (((int32_t) _a[4] - (int32_t) _a[5]) <= (int32_t) s16_min)
-                     ? s16_min
-                     : ((int32_t) _a[4] - (int32_t) _a[5]);
-    int16_t d3 = (((int32_t) _a[6] - (int32_t) _a[7]) <= (int32_t) s16_min)
-                     ? s16_min
-                     : ((int32_t) _a[6] - (int32_t) _a[7]);
-    int16_t d4 = (((int32_t) _b[0] - (int32_t) _b[1]) <= (int32_t) s16_min)
-                     ? s16_min
-                     : ((int32_t) _b[0] - (int32_t) _b[1]);
-    int16_t d5 = (((int32_t) _b[2] - (int32_t) _b[3]) <= (int32_t) s16_min)
-                     ? s16_min
-                     : ((int32_t) _b[2] - (int32_t) _b[3]);
-    int16_t d6 = (((int32_t) _b[4] - (int32_t) _b[5]) <= (int32_t) s16_min)
-                     ? s16_min
-                     : ((int32_t) _b[4] - (int32_t) _b[5]);
-    int16_t d7 = (((int32_t) _b[6] - (int32_t) _b[7]) <= (int32_t) s16_min)
-                     ? s16_min
-                     : ((int32_t) _b[6] - (int32_t) _b[7]);
+    int16_t d16[8];
+    int32_t d32[8];
+    d32[0] = (int32_t) _a[0] - (int32_t) _a[1];
+    d32[1] = (int32_t) _a[2] - (int32_t) _a[3];
+    d32[2] = (int32_t) _a[4] - (int32_t) _a[5];
+    d32[3] = (int32_t) _a[6] - (int32_t) _a[7];
+    d32[4] = (int32_t) _b[0] - (int32_t) _b[1];
+    d32[5] = (int32_t) _b[2] - (int32_t) _b[3];
+    d32[6] = (int32_t) _b[4] - (int32_t) _b[5];
+    d32[7] = (int32_t) _b[6] - (int32_t) _b[7];
+    for (int i = 0; i < 8; i++) {
+        if (d32[i] > (int32_t) INT16_MAX)
+            d16[i] = INT16_MAX;
+        else if (d32[i] < (int32_t) INT16_MIN)
+            d16[i] = INT16_MIN;
+        else
+            d16[i] = (int16_t) d32[i];
+    }
 
     __m128i a = do_mm_load_ps((const int32_t *) _a);
     __m128i b = do_mm_load_ps((const int32_t *) _b);
     __m128i c = _mm_hsubs_epi16(a, b);
 
-    return validateInt16(c, d0, d1, d2, d3, d4, d5, d6, d7);
+    return validateInt16(c, d16[0], d16[1], d16[2], d16[3], d16[4], d16[5],
+                         d16[6], d16[7]);
 }
 
 result_t test_mm_hsubs_pi16(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -6657,12 +7036,48 @@ result_t test_mm_sign_pi8(const SSE2NEONTestImpl &impl, uint32_t i)
 /* SSE4.1 */
 result_t test_mm_blend_epi16(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const int16_t *_a = (const int16_t *) impl.mTestIntPointer1;
+    const int16_t *_b = (const int16_t *) impl.mTestIntPointer2;
+    const int mask = 104;
+
+    int16_t _c[8];
+    for (int j = 0; j < 8; j++) {
+        if ((mask >> j) & 0x1) {
+            _c[j] = _b[j];
+        } else {
+            _c[j] = _a[j];
+        }
+    }
+
+    __m128i a = do_mm_load_ps((const int32_t *) _a);
+    __m128i b = do_mm_load_ps((const int32_t *) _b);
+    __m128i c = _mm_blend_epi16(a, b, mask);
+
+    return validateInt16(c, _c[0], _c[1], _c[2], _c[3], _c[4], _c[5], _c[6],
+                         _c[7]);
 }
 
 result_t test_mm_blend_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+    const double *_b = (const double *) impl.mTestFloatPointer2;
+    // the last argument must be a 2-bit immediate
+    const int mask = 3;
+
+    double _c[2];
+    for (int j = 0; j < 2; j++) {
+        if ((mask >> j) & 0x1) {
+            _c[j] = _b[j];
+        } else {
+            _c[j] = _a[j];
+        }
+    }
+
+    __m128d a = do_mm_load_pd((const double *) _a);
+    __m128d b = do_mm_load_pd((const double *) _b);
+    __m128d c = _mm_blend_pd(a, b, mask);
+
+    return validateDouble(c, _c[0], _c[1]);
 }
 
 result_t test_mm_blend_ps(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -6833,7 +7248,15 @@ result_t test_mm_blendv_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_ceil_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+
+    double dx = ceil(_a[0]);
+    double dy = ceil(_a[1]);
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d ret = _mm_ceil_pd(a);
+
+    return validateDouble(ret, dx, dy);
 }
 
 result_t test_mm_ceil_ps(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -6846,12 +7269,22 @@ result_t test_mm_ceil_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 
     __m128 a = _mm_load_ps(_a);
     __m128 c = _mm_ceil_ps(a);
-    return validateFloatEpsilon(c, dx, dy, dz, dw, 5.0f);
+    return validateFloat(c, dx, dy, dz, dw);
 }
 
 result_t test_mm_ceil_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+    const double *_b = (const double *) impl.mTestFloatPointer2;
+
+    double dx = ceil(_b[0]);
+    double dy = _a[1];
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d ret = _mm_ceil_sd(a, b);
+
+    return validateDouble(ret, dx, dy);
 }
 
 result_t test_mm_ceil_ss(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -7064,6 +7497,8 @@ result_t test_mm_dp_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_dp_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 {
+    // FIXME: The rounding mode would affect the testing result on ARM platform.
+    _MM_SET_ROUNDING_MODE(_MM_ROUND_NEAREST);
     const float *_a = impl.mTestFloatPointer1;
     const float *_b = impl.mTestFloatPointer2;
     const int imm = 0xFF;
@@ -7086,12 +7521,25 @@ result_t test_mm_dp_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 result_t test_mm_extract_epi32(const SSE2NEONTestImpl &impl, uint32_t i)
 {
     int32_t *_a = (int32_t *) impl.mTestIntPointer1;
-    const int imm = 1;
-
+    const int idx = i & 0x3;
     __m128i a = do_mm_load_ps((const int32_t *) _a);
-    int c = _mm_extract_epi32(a, imm);
+    int c;
+    switch (idx) {
+    case 0:
+        c = _mm_extract_epi32(a, 0);
+        break;
+    case 1:
+        c = _mm_extract_epi32(a, 1);
+        break;
+    case 2:
+        c = _mm_extract_epi32(a, 2);
+        break;
+    case 3:
+        c = _mm_extract_epi32(a, 3);
+        break;
+    }
 
-    ASSERT_RETURN(c == *(_a + imm));
+    ASSERT_RETURN(c == *(_a + idx));
     return TEST_SUCCESS;
 }
 
@@ -7117,7 +7565,40 @@ result_t test_mm_extract_epi64(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_extract_epi8(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    uint8_t *_a = (uint8_t *) impl.mTestIntPointer1;
+    const int idx = i & 0x7;
+
+    __m128i a = do_mm_load_ps((const int32_t *) _a);
+    int c;
+    switch (idx) {
+    case 0:
+        c = _mm_extract_epi8(a, 0);
+        break;
+    case 1:
+        c = _mm_extract_epi8(a, 1);
+        break;
+    case 2:
+        c = _mm_extract_epi8(a, 2);
+        break;
+    case 3:
+        c = _mm_extract_epi8(a, 3);
+        break;
+    case 4:
+        c = _mm_extract_epi8(a, 4);
+        break;
+    case 5:
+        c = _mm_extract_epi8(a, 5);
+        break;
+    case 6:
+        c = _mm_extract_epi8(a, 6);
+        break;
+    case 7:
+        c = _mm_extract_epi8(a, 7);
+        break;
+    }
+
+    ASSERT_RETURN(c == *(_a + idx));
+    return TEST_SUCCESS;
 }
 
 result_t test_mm_extract_ps(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -7148,7 +7629,15 @@ result_t test_mm_extract_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_floor_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+
+    double dx = floor(_a[0]);
+    double dy = floor(_a[1]);
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d ret = _mm_floor_pd(a);
+
+    return validateDouble(ret, dx, dy);
 }
 
 result_t test_mm_floor_ps(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -7161,12 +7650,22 @@ result_t test_mm_floor_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 
     __m128 a = do_mm_load_ps(_a);
     __m128 c = _mm_floor_ps(a);
-    return validateFloatEpsilon(c, dx, dy, dz, dw, 5.0f);
+    return validateFloat(c, dx, dy, dz, dw);
 }
 
 result_t test_mm_floor_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (const double *) impl.mTestFloatPointer1;
+    const double *_b = (const double *) impl.mTestFloatPointer2;
+
+    double dx = floor(_b[0]);
+    double dy = _a[1];
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    __m128d ret = _mm_floor_sd(a, b);
+
+    return validateDouble(ret, dx, dy);
 }
 
 result_t test_mm_floor_ss(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -7237,7 +7736,24 @@ result_t test_mm_insert_epi8(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_insert_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const float *_a = impl.mTestFloatPointer1;
+    const float *_b = impl.mTestFloatPointer2;
+    const uint8_t imm = 0x1 << 6 | 0x2 << 4 | 0x1 << 2;
+
+    float d[4] = {_a[0], _a[1], _a[2], _a[3]};
+    d[(imm >> 4) & 0x3] = _b[(imm >> 6) & 0x3];
+
+    for (int j = 0; j < 4; j++) {
+        if (imm & (1 << j)) {
+            d[j] = 0;
+        }
+    }
+
+    __m128 a = _mm_load_ps(_a);
+    __m128 b = _mm_load_ps(_b);
+    __m128 c = _mm_insert_ps(a, b, imm);
+
+    return validateFloat(c, d[0], d[1], d[2], d[3]);
 }
 
 result_t test_mm_max_epi32(const SSE2NEONTestImpl &impl, uint32_t i)
@@ -7497,25 +8013,208 @@ result_t test_mm_packus_epi32(const SSE2NEONTestImpl &impl, uint32_t i)
 
 result_t test_mm_round_pd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (double *) impl.mTestFloatPointer1;
+    double d[2];
+    __m128d ret;
+
+    __m128d a = do_mm_load_pd(_a);
+    switch (i & 0x7) {
+    case 0:
+        d[0] = bankersRounding(_a[0]);
+        d[1] = bankersRounding(_a[1]);
+
+        ret = _mm_round_pd(a, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+        break;
+    case 1:
+        d[0] = floor(_a[0]);
+        d[1] = floor(_a[1]);
+
+        ret = _mm_round_pd(a, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
+        break;
+    case 2:
+        d[0] = ceil(_a[0]);
+        d[1] = ceil(_a[1]);
+
+        ret = _mm_round_pd(a, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
+        break;
+    case 3:
+        d[0] = _a[0] > 0 ? floor(_a[0]) : ceil(_a[0]);
+        d[1] = _a[1] > 0 ? floor(_a[1]) : ceil(_a[1]);
+
+        ret = _mm_round_pd(a, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+        break;
+    case 4:
+        d[0] = bankersRounding(_a[0]);
+        d[1] = bankersRounding(_a[1]);
+
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_NEAREST);
+        ret = _mm_round_pd(a, _MM_FROUND_CUR_DIRECTION);
+        break;
+    case 5:
+        d[0] = floor(_a[0]);
+        d[1] = floor(_a[1]);
+
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_DOWN);
+        ret = _mm_round_pd(a, _MM_FROUND_CUR_DIRECTION);
+        break;
+    case 6:
+        d[0] = ceil(_a[0]);
+        d[1] = ceil(_a[1]);
+
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_UP);
+        ret = _mm_round_pd(a, _MM_FROUND_CUR_DIRECTION);
+        break;
+    case 7:
+        d[0] = _a[0] > 0 ? floor(_a[0]) : ceil(_a[0]);
+        d[1] = _a[1] > 0 ? floor(_a[1]) : ceil(_a[1]);
+
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_TOWARD_ZERO);
+        ret = _mm_round_pd(a, _MM_FROUND_CUR_DIRECTION);
+        break;
+    }
+
+    return validateDouble(ret, d[0], d[1]);
 }
 
 result_t test_mm_round_ps(const SSE2NEONTestImpl &impl, uint32_t i)
 {
     const float *_a = impl.mTestFloatPointer1;
-    float dx = roundf(_a[0]);
-    float dy = roundf(_a[1]);
-    float dz = roundf(_a[2]);
-    float dw = roundf(_a[3]);
+    float f[4];
+    __m128 ret;
 
     __m128 a = do_mm_load_ps(_a);
-    __m128 c = _mm_round_ps(a, _MM_FROUND_CUR_DIRECTION);
-    return validateFloatEpsilon(c, dx, dy, dz, dw, 5.0f);
+    switch (i & 0x7) {
+    case 0:
+        f[0] = bankersRounding(_a[0]);
+        f[1] = bankersRounding(_a[1]);
+        f[2] = bankersRounding(_a[2]);
+        f[3] = bankersRounding(_a[3]);
+
+        ret = _mm_round_ps(a, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+        break;
+    case 1:
+        f[0] = floorf(_a[0]);
+        f[1] = floorf(_a[1]);
+        f[2] = floorf(_a[2]);
+        f[3] = floorf(_a[3]);
+
+        ret = _mm_round_ps(a, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
+        break;
+    case 2:
+        f[0] = ceilf(_a[0]);
+        f[1] = ceilf(_a[1]);
+        f[2] = ceilf(_a[2]);
+        f[3] = ceilf(_a[3]);
+
+        ret = _mm_round_ps(a, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
+        break;
+    case 3:
+        f[0] = _a[0] > 0 ? floorf(_a[0]) : ceilf(_a[0]);
+        f[1] = _a[1] > 0 ? floorf(_a[1]) : ceilf(_a[1]);
+        f[2] = _a[2] > 0 ? floorf(_a[2]) : ceilf(_a[2]);
+        f[3] = _a[3] > 0 ? floorf(_a[3]) : ceilf(_a[3]);
+
+        ret = _mm_round_ps(a, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+        break;
+    case 4:
+        f[0] = bankersRounding(_a[0]);
+        f[1] = bankersRounding(_a[1]);
+        f[2] = bankersRounding(_a[2]);
+        f[3] = bankersRounding(_a[3]);
+
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_NEAREST);
+        ret = _mm_round_ps(a, _MM_FROUND_CUR_DIRECTION);
+        break;
+    case 5:
+        f[0] = floorf(_a[0]);
+        f[1] = floorf(_a[1]);
+        f[2] = floorf(_a[2]);
+        f[3] = floorf(_a[3]);
+
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_DOWN);
+        ret = _mm_round_ps(a, _MM_FROUND_CUR_DIRECTION);
+        break;
+    case 6:
+        f[0] = ceilf(_a[0]);
+        f[1] = ceilf(_a[1]);
+        f[2] = ceilf(_a[2]);
+        f[3] = ceilf(_a[3]);
+
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_UP);
+        ret = _mm_round_ps(a, _MM_FROUND_CUR_DIRECTION);
+        break;
+    case 7:
+        f[0] = _a[0] > 0 ? floorf(_a[0]) : ceilf(_a[0]);
+        f[1] = _a[1] > 0 ? floorf(_a[1]) : ceilf(_a[1]);
+        f[2] = _a[2] > 0 ? floorf(_a[2]) : ceilf(_a[2]);
+        f[3] = _a[3] > 0 ? floorf(_a[3]) : ceilf(_a[3]);
+
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_TOWARD_ZERO);
+        ret = _mm_round_ps(a, _MM_FROUND_CUR_DIRECTION);
+        break;
+    }
+
+    return validateFloat(ret, f[0], f[1], f[2], f[3]);
 }
 
 result_t test_mm_round_sd(const SSE2NEONTestImpl &impl, uint32_t i)
 {
-    return TEST_UNIMPL;
+    const double *_a = (double *) impl.mTestFloatPointer1;
+    const double *_b = (double *) impl.mTestFloatPointer2;
+    double d[2];
+    __m128d ret;
+
+    __m128d a = do_mm_load_pd(_a);
+    __m128d b = do_mm_load_pd(_b);
+    d[1] = _a[1];
+    switch (i & 0x7) {
+    case 0:
+        d[0] = bankersRounding(_b[0]);
+
+        ret = _mm_round_sd(a, b, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+        break;
+    case 1:
+        d[0] = floor(_b[0]);
+
+        ret = _mm_round_sd(a, b, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
+        break;
+    case 2:
+        d[0] = ceil(_b[0]);
+
+        ret = _mm_round_sd(a, b, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
+        break;
+    case 3:
+        d[0] = _b[0] > 0 ? floor(_b[0]) : ceil(_b[0]);
+
+        ret = _mm_round_sd(a, b, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+        break;
+    case 4:
+        d[0] = bankersRounding(_b[0]);
+
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_NEAREST);
+        ret = _mm_round_sd(a, b, _MM_FROUND_CUR_DIRECTION);
+        break;
+    case 5:
+        d[0] = floor(_b[0]);
+
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_DOWN);
+        ret = _mm_round_sd(a, b, _MM_FROUND_CUR_DIRECTION);
+        break;
+    case 6:
+        d[0] = ceil(_b[0]);
+
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_UP);
+        ret = _mm_round_sd(a, b, _MM_FROUND_CUR_DIRECTION);
+        break;
+    case 7:
+        d[0] = _b[0] > 0 ? floor(_b[0]) : ceil(_b[0]);
+
+        _MM_SET_ROUNDING_MODE(_MM_ROUND_TOWARD_ZERO);
+        ret = _mm_round_sd(a, b, _MM_FROUND_CUR_DIRECTION);
+        break;
+    }
+
+    return validateDouble(ret, d[0], d[1]);
 }
 
 result_t test_mm_round_ss(const SSE2NEONTestImpl &impl, uint32_t i)
